@@ -115,4 +115,84 @@ ENTRYPOINT [ "/nxstart.sh" ]                                # Container başlad�
 CMD [ "nginx", "-g", "daemon off;" ]                         # Arka planda değil, direkt çalıştırılır
 ```
 
-Devamında WordPress ve Makefile açıklamaları da aynı şekilde eklenecektir. Devam edeyim mi?
+---
+
+### 📁 `/requirements/wordpress/conf/www.conf`
+
+```ini
+[www]                                  # PHP-FPM için yapılandırma bloğu
+user = www-data                        # PHP işlemleri www-data kullanıcısıyla çalıştırılır
+group = www-data                       # PHP işlemleri www-data grubuyla çalıştırılır
+listen = 9000                          # PHP-FPM bu port üzerinden dinler
+listen.owner = www-data               # Dinleyici sahibi www-data
+listen.group = www-data               # Dinleyici grubu www-data
+pm = dynamic                           # Dinamik process yönetimi
+pm.max_children = 5                   # Maksimum çocuk süreç sayısı
+pm.start_servers = 2                  # Başlangıçta başlatılacak süreç sayısı
+pm.min_spare_servers = 1             # Minimum boşta bekleyen süreç sayısı
+pm.max_spare_servers = 3             # Maksimum boşta bekleyen süreç sayısı
+```
+
+### 🖥️ `/requirements/wordpress/tools/wp.sh`
+
+```bash
+#!/bin/bash
+
+chown -R www-data: /var/www/*;                     # Dosya sahipliğini ayarla
+chmod -R 755 /var/www/*;                           # Dosya izinlerini ayarla
+mkdir -p /run/php/;                                # PHP çalışma dizinini oluştur
+touch /run/php/php7.4-fpm.pid;                     # PID dosyası oluştur
+
+if [ ! -f /var/www/html/wp-config.php ]; then      # Eğer WordPress kurulmamışsa
+    mkdir -p /var/www/html;
+    cd /var/www/html;
+
+    wp-cli core download --allow-root;             # WordPress'i indir
+
+    wp-cli config create --allow-root \            # wp-config.php dosyasını oluştur
+        --dbname=$MYSQL_DATABASE_NAME \
+        --dbuser=$MYSQL_USER \
+        --dbpass=$MYSQL_PASSWORD \
+        --dbhost=mariadb;
+
+    echo "Installing WordPress core..."
+
+    wp-cli core install --allow-root \             # WordPress çekirdeğini kur
+        --url=$DOMAIN_NAME \
+        --title=$TITLE \
+        --admin_user=$WORDPRESS_ADMIN_NAME \
+        --admin_password=$WORDPRESS_ADMIN_PASSWORD \
+        --admin_email=$WORDPRESS_ADMIN_EMAIL;
+
+    wp-cli user create --allow-root \              # İkinci bir kullanıcı oluştur
+        $MYSQL_USER $MYSQL_EMAIL \
+        --user_pass=$MYSQL_PASSWORD;
+
+    echo "WordPress installation complete."
+fi
+
+echo "You're able to visit $DOMAIN_NAME in your browser."
+
+exec "$@"                                           # Son komutu çalıştır (php-fpm)
+```
+
+### 🐳 `/requirements/wordpress/Dockerfile`
+
+```Dockerfile
+FROM debian:bullseye
+
+RUN apt-get update && apt-get install -y php-fpm php-mysql sendmail wget   # PHP-FPM ve gerekli araçlar yüklenir
+
+RUN wget https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \  # WP-CLI indirilir
+    && chmod +x wp-cli.phar \
+    && mv wp-cli.phar /usr/local/bin/wp-cli
+
+EXPOSE 9000                                     # PHP-FPM portu dışa açılır
+
+COPY ./conf/www.conf /etc/php/7.4/fpm/pool.d/   # PHP-FPM yapılandırması kopyalanır
+COPY ./tools/wp.sh /                            # WordPress kurulum scripti
+RUN chmod +x /wp.sh                             # Script çalıştırılabilir hale getirilir
+
+ENTRYPOINT [ "/wp.sh" ]                         # Container başlatıldığında bu script çalışır
+CMD [ "/usr/sbin/php-fpm7.4", "--nodaemonize" ] # PHP-FPM servisi foreground olarak çalışır
+```
