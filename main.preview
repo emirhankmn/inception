@@ -1,0 +1,13 @@
+services:
+  wordpress:
+    build: ./requirements/wordpress
+    environment:
+      - WORDPRESS_DB_HOST=mariadb
+  mariadb:
+    build: ./requirements/mariadb
+    environment:
+      - MYSQL_ROOT_PASSWORD=secret
+  nginx:
+    build: ./requirements/nginx
+    ports:
+      - "443:443"
